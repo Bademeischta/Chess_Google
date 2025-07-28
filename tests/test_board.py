@@ -1,6 +1,6 @@
 import unittest
 import chess
-from chess_engine.board import Board, make_move, undo_move, is_legal, is_terminal
+from chess_engine.board import Board, make_move, undo_move, is_legal, is_terminal, IllegalMoveError
 
 class TestBoard(unittest.TestCase):
 
@@ -12,7 +12,7 @@ class TestBoard(unittest.TestCase):
 
     def test_illegal_move(self):
         board = Board()
-        with self.assertRaises(ValueError):
+        with self.assertRaises(IllegalMoveError):
             make_move(board, "e2e5")
 
     def test_undo_move(self):
@@ -37,7 +37,6 @@ class TestBoard(unittest.TestCase):
         board = Board(fen="k7/8/8/8/8/8/8/8 w - - 0 1")
         self.assertEqual(is_terminal(board), 'stalemate')
 
-
     def test_fen_parsing(self):
         fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
         board = Board(fen=fen)
@@ -51,6 +50,34 @@ class TestBoard(unittest.TestCase):
         undone_board = undo_move(moved_board2)
         undone_board2 = undo_move(undone_board)
         self.assertEqual(undone_board2.to_fen(), initial_fen)
+
+    def test_promotion(self):
+        board = Board(fen="8/P7/8/k7/8/8/8/K7 w - - 0 1")
+        # Promote to queen
+        new_board = make_move(board, "a7a8q")
+        self.assertEqual(new_board.board.piece_at(chess.A8).symbol(), 'Q')
+
+    def test_castling_kingside(self):
+        board = Board(fen="r3k2r/pppp1ppp/8/8/8/8/PPPP1PPP/R3K2R w KQkq - 0 1")
+        new_board = make_move(board, "e1g1")
+        self.assertEqual(new_board.board.piece_at(chess.G1).symbol(), 'K')
+        self.assertEqual(new_board.board.piece_at(chess.F1).symbol(), 'R')
+
+    def test_castling_queenside(self):
+        board = Board(fen="r3k2r/pppp1ppp/8/8/8/8/PPPP1PPP/R3K2R w KQkq - 0 1")
+        new_board = make_move(board, "e1c1")
+        self.assertEqual(new_board.board.piece_at(chess.C1).symbol(), 'K')
+        self.assertEqual(new_board.board.piece_at(chess.D1).symbol(), 'R')
+
+    def test_en_passant(self):
+        board = Board()
+        board = make_move(board, "e2e4")
+        board = make_move(board, "a7a6")
+        board = make_move(board, "e4e5")
+        board = make_move(board, "d7d5")
+        new_board = make_move(board, "e5d6")
+        self.assertIsNone(new_board.board.piece_at(chess.D5))
+
 
 if __name__ == '__main__':
     unittest.main()
