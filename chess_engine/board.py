@@ -21,87 +21,80 @@ class Board:
                  If None, the board is set to the starting position.
         """
         if fen:
-            self.board = chess.Board(fen)
+            self._board = chess.Board(fen)
         else:
-            self.board = chess.Board()
+            self._board = chess.Board()
         self.history: List[str] = []
 
     def to_fen(self) -> str:
         """Returns the FEN representation of the current board state."""
-        return self.board.fen()
+        return self._board.fen()
 
-def make_move(board_state: Board, move_uci: str) -> Board:
-    """
-    Executes a move and returns the new board state.
+    def is_legal(self, move_uci: str) -> bool:
+        """Checks if a move is legal in the given board state."""
+        try:
+            move = chess.Move.from_uci(move_uci)
+            return move in self._board.legal_moves
+        except ValueError:
+            return False
 
-    Args:
-        board_state: The current board state.
-        move_uci: The move in UCI format (e.g., "e2e4").
+    def make_move(self, move_uci: str) -> 'Board':
+        """
+        Executes a move and returns a new board state.
 
-    Returns:
-        A new Board object with the move applied.
+        Args:
+            move_uci: The move in UCI format (e.g., "e2e4").
 
-    Raises:
-        IllegalMoveError: If the move is not legal.
-    """
-    new_board = Board(board_state.to_fen())
-    new_board.history = list(board_state.history)
-    new_board.history.append(board_state.to_fen())
+        Returns:
+            A new Board object with the move applied.
 
-    try:
-        move = chess.Move.from_uci(move_uci)
-        if move in new_board.board.legal_moves:
-            new_board.board.push(move)
-            return new_board
-        else:
+        Raises:
+            IllegalMoveError: If the move is not legal.
+        """
+        if not self.is_legal(move_uci):
             raise IllegalMoveError(f"Illegal move: {move_uci}")
-    except ValueError:
-        raise IllegalMoveError(f"Invalid UCI move string: {move_uci}")
 
-def undo_move(board_state: Board) -> Board:
-    """
-    Undoes the last move and returns the previous board state.
+        new_board = Board(self.to_fen())
+        new_board.history = list(self.history)
+        new_board.history.append(self.to_fen())
 
-    Args:
-        board_state: The current board state.
-
-    Returns:
-        A new Board object representing the state before the last move.
-
-    Raises:
-        ValueError: If there is no history to undo.
-    """
-    if not board_state.history:
-        raise ValueError("No history to undo.")
-    previous_fen = board_state.history[-1]
-    new_board = Board(previous_fen)
-    new_board.history = board_state.history[:-1]
-    return new_board
-
-def is_legal(board_state: Board, move_uci: str) -> bool:
-    """Checks if a move is legal in the given board state."""
-    try:
         move = chess.Move.from_uci(move_uci)
-        return move in board_state.board.legal_moves
-    except ValueError:
-        return False
+        new_board._board.push(move)
+        return new_board
 
-def is_terminal(board_state: Board) -> Optional[str]:
-    """
-    Checks if the game is over.
+    def undo_move(self) -> 'Board':
+        """
+        Undoes the last move and returns the previous board state.
 
-    Returns:
-        A string describing the terminal state (e.g., 'checkmate', 'stalemate'),
-        or None if the game is not over.
-    """
-    if board_state.board.is_checkmate():
-        return 'checkmate'
-    if board_state.board.is_stalemate():
-        return 'stalemate'
-    if board_state.board.is_insufficient_material():
-        return 'draw_insufficient_material'
-    if board_state.board.can_claim_fifty_moves():
-        return 'draw_50'
-    if board_state.board.can_claim_threefold_repetition():
-        return 'draw_3rep'
-    return None
+        Returns:
+            A new Board object representing the state before the last move.
+
+        Raises:
+            ValueError: If there is no history to undo.
+        """
+        if not self.history:
+            raise ValueError("No history to undo.")
+        previous_fen = self.history[-1]
+        new_board = Board(previous_fen)
+        new_board.history = self.history[:-1]
+        return new_board
+
+    def is_terminal(self) -> Optional[str]:
+        """
+        Checks if the game is over.
+
+        Returns:
+            A string describing the terminal state (e.g., 'checkmate', 'stalemate'),
+            or None if the game is not over.
+        """
+        if self._board.is_checkmate():
+            return 'checkmate'
+        if self._board.is_stalemate():
+            return 'stalemate'
+        if self._board.is_insufficient_material():
+            return 'draw_insufficient_material'
+        if self._board.can_claim_fifty_moves():
+            return 'draw_50'
+        if self._board.can_claim_threefold_repetition():
+            return 'draw_3rep'
+        return None
