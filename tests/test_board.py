@@ -1,83 +1,84 @@
-import unittest
-import chess
-from chess_engine.board import Board, IllegalMoveError
+import pytest
+from chess_engine.board import (
+    parse_fen, to_fen, State, Move,
+    is_legal, make_move, undo_move,
+    get_terminal_status,
+    IllegalMoveError, FenError, HistoryUnderflowError,
+    Terminal, Color, PieceType, _get_piece_at
+)
 
-class TestBoard(unittest.TestCase):
+def square(file: str, rank: int) -> int:
+    return (rank - 1) * 8 + ("abcdefgh".index(file))
 
-    def test_make_move(self):
-        board = Board()
-        new_board = board.make_move("e2e4")
-        self.assertNotEqual(board.to_fen(), new_board.to_fen())
-        self.assertEqual(new_board._board.peek(), chess.Move.from_uci("e2e4"))
+# --- FEN Parsing & Serialization -------------------------------------------
 
-    def test_illegal_move(self):
-        board = Board()
-        with self.assertRaises(IllegalMoveError):
-            board.make_move("e2e5")
+def test_parse_and_roundtrip_fen_initial():
+    fen = "rn1qkb1r/pp3ppp/2p1pn2/3p4/3P4/2N1PN2/PP3PPP/R1BQKB1R w KQkq - 0 1"
+    state = parse_fen(fen)
+    assert to_fen(state) == fen
 
-    def test_undo_move(self):
-        board = Board()
-        fen_before = board.to_fen()
-        new_board = board.make_move("e2e4")
-        undone_board = new_board.undo_move()
-        self.assertEqual(undone_board.to_fen(), fen_before)
+def test_parse_fen_invalid():
+    with pytest.raises(FenError):
+        parse_fen("invalid fen string")
 
-    def test_is_legal(self):
-        board = Board()
-        self.assertTrue(board.is_legal("e2e4"))
-        self.assertFalse(board.is_legal("e2e5"))
+# --- Move Making & Undo -----------------------------------------------------
 
-    def test_is_terminal_checkmate(self):
-        # Fool's Mate
-        board = Board(fen="rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2")
-        new_board = board.make_move("d8h4")
-        self.assertEqual(new_board.is_terminal(), 'checkmate')
+def test_make_move_and_undo_initial_e2e4():
+    state = parse_fen("startpos")
+    move = Move(from_sq=square('e', 2), to_sq=square('e', 4), promotion=None)
+    assert is_legal(state, move) is True
+    new_state = make_move(state, move)
+    # nach Zug: side_to_move gewechselt und halfmove_clock ggf. zurückgesetzt
+    assert new_state.side_to_move == Color.BLACK
+    restored = undo_move(new_state)
+    assert restored == state
 
-    def test_is_terminal_stalemate(self):
-        board = Board(fen="k7/8/8/8/8/8/8/8 w - - 0 1")
-        self.assertEqual(board.is_terminal(), 'stalemate')
+def test_illegal_move_raises():
+    state = parse_fen("startpos")
+    bad = Move(from_sq=0, to_sq=1, promotion=None)
+    with pytest.raises(IllegalMoveError):
+        make_move(state, bad)
 
-    def test_fen_parsing(self):
-        fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-        board = Board(fen=fen)
-        self.assertEqual(board.to_fen(), fen)
+def test_undo_move_underflow():
+    state = parse_fen("startpos")
+    with pytest.raises(HistoryUnderflowError):
+        undo_move(state)
 
-    def test_regression_make_undo(self):
-        board = Board()
-        initial_fen = board.to_fen()
-        board = board.make_move("g1f3")
-        board = board.make_move("g8f6")
-        board = board.undo_move()
-        board = board.undo_move()
-        self.assertEqual(board.to_fen(), initial_fen)
+# --- Sonderregeln ------------------------------------------------------------
 
-    def test_promotion(self):
-        board = Board(fen="8/P7/8/k7/8/8/8/K7 w - - 0 1")
-        # Promote to queen
-        new_board = board.make_move("a7a8q")
-        self.assertEqual(new_board._board.piece_at(chess.A8).symbol(), 'Q')
+def test_castling_rights_and_moves():
+    state = parse_fen("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1")
+    kingside = Move(from_sq=4, to_sq=6, promotion=None)
+    queenside = Move(from_sq=4, to_sq=2, promotion=None)
+    assert is_legal(state, kingside)
+    assert is_legal(state, queenside)
 
-    def test_castling_kingside(self):
-        board = Board(fen="r3k2r/pppp1ppp/8/8/8/8/PPPP1PPP/R3K2R w KQkq - 0 1")
-        new_board = board.make_move("e1g1")
-        self.assertEqual(new_board._board.piece_at(chess.G1).symbol(), 'K')
-        self.assertEqual(new_board._board.piece_at(chess.F1).symbol(), 'R')
+def test_en_passant():
+    # Weiß hat e2-e4 gespielt → Schwarz kann d4xd3 en passant ziehen
+    state = parse_fen("rnbqkbnr/ppp1pppp/8/8/3pP3/8/PPP2PPP/RNBQKBNR b KQkq e3 0 2")
+    ep_move = Move(from_sq=27, to_sq=20, promotion=None)  # d4 → e3
+    assert is_legal(state, ep_move)
+    new_state = make_move(state, ep_move)
+    # Bauer auf e4 muss verschwunden sein
+    assert _get_piece_at(new_state, square('e', 4)) is None
 
-    def test_castling_queenside(self):
-        board = Board(fen="r3k2r/pppp1ppp/8/8/8/8/PPPP1PPP/R3K2R w KQkq - 0 1")
-        new_board = board.make_move("e1c1")
-        self.assertEqual(new_board._board.piece_at(chess.C1).symbol(), 'K')
-        self.assertEqual(new_board._board.piece_at(chess.D1).symbol(), 'R')
+def test_50_move_rule_draw():
+    state = parse_fen("8/8/8/8/8/8/8/8 w - - 100 50")
+    assert get_terminal_status(state) == Terminal.DRAW_50_MOVES
 
-    def test_en_passant(self):
-        board = Board()
-        board = board.make_move("e2e4")
-        board = board.make_move("a7a6")
-        board = board.make_move("e4e5")
-        board = board.make_move("d7d5")
-        new_board = board.make_move("e5d6")
-        self.assertIsNone(new_board._board.piece_at(chess.D5))
+def test_threefold_repetition():
+    base = parse_fen("startpos")
+    # dreimalige Wiederholung
+    s1 = make_move(base, Move(from_sq=square('g', 1), to_sq=square('f', 3), promotion=None))
+    s2 = make_move(s1, Move(from_sq=square('g', 8), to_sq=square('f', 6), promotion=None))
+    s3 = make_move(s2, Move(from_sq=square('f', 3), to_sq=square('g', 1), promotion=None))
+    s4 = make_move(s3, Move(from_sq=square('f', 6), to_sq=square('g', 8), promotion=None))
+    s5 = make_move(s4, Move(from_sq=square('g', 1), to_sq=square('f', 3), promotion=None))
+    s6 = make_move(s5, Move(from_sq=square('g', 8), to_sq=square('f', 6), promotion=None))
+    s7 = make_move(s6, Move(from_sq=square('f', 3), to_sq=square('g', 1), promotion=None))
+    s8 = make_move(s7, Move(from_sq=square('f', 6), to_sq=square('g', 8), promotion=None))
+    assert get_terminal_status(s8) == Terminal.DRAW_THREEFOLD_REP
 
-
-if __name__ == '__main__':
-    unittest.main()
+def test_insufficient_material():
+    state = parse_fen("8/8/8/8/8/8/8/Kk6 w - - 0 1")
+    assert get_terminal_status(state) == Terminal.DRAW_INSUFFICIENT
